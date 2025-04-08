@@ -287,6 +287,12 @@ export const damageTypeIcons = new Map([
 
 export function getAttributeLabel(attribute: Attribute) {
   switch (attribute) {
+    case "vig":
+      return "Vigor";
+    case "min":
+      return "Mind";
+    case "end":
+      return "Endurance";
     case "str":
       return "Strength";
     case "dex":
@@ -302,6 +308,12 @@ export function getAttributeLabel(attribute: Attribute) {
 
 export function getShortAttributeLabel(attribute: Attribute) {
   switch (attribute) {
+    case "vig":
+      return "Vig";
+    case "min":
+      return "Min";
+    case "end":
+      return "End";
     case "str":
       return "Str";
     case "dex":

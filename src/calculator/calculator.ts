@@ -110,9 +110,15 @@ export default function getWeaponAttack({
             if (attributeCorrect === true) {
               scaling = weapon.attributeScaling[upgradeLevel][attribute] ?? 0;
             } else {
-              scaling =
-                (attributeCorrect * (weapon.attributeScaling[upgradeLevel][attribute] ?? 0)) /
-                (weapon.attributeScaling[0][attribute] ?? 0);
+              // Add nullish check for base scaling value
+              const baseScaling = weapon.attributeScaling[0]?.[attribute] ?? 0;
+              if (baseScaling === 0) {
+                scaling = 0; // Avoid division by zero
+              } else {
+                scaling =
+                  (attributeCorrect * (weapon.attributeScaling[upgradeLevel][attribute] ?? 0)) /
+                  baseScaling;
+              }
             }
 
             if (scaling) {

@@ -43,16 +43,12 @@ interface UpdateAppState extends AppState {
 const defaultAppState: AppState = {
   regulationVersionName: "latest",
   attributes: {
-    str: 30,
-    dex: 30,
-    int: 30,
-    fai: 30,
-    arc: 30,
+    vig: 10, min: 10, end: 10, str: 30, dex: 30, int: 30, fai: 30, arc: 30,
   },
   twoHanding: false,
   upgradeLevel: 25,
   weaponTypes: [WeaponType.AXE],
-  affinityIds: [0, -1], // Standard and Special
+  affinityIds: [0, -1],
   includeDLC: true,
   effectiveOnly: false,
   splitDamage: true,
@@ -66,24 +62,67 @@ const defaultAppState: AppState = {
 /**
  * @returns the initial state of the app, restored from localstorage and the URL if available
  */
-function getInitialAppState() {
-  const appState = { ...defaultAppState };
-
+function getInitialAppState(): AppState {
+  let loadedState: Partial<AppState> = {};
   try {
-    const storedAppState = localStorage.getItem("appState");
-    if (storedAppState) {
-      Object.assign(appState, JSON.parse(storedAppState));
+    const storedAppStateString = localStorage.getItem("appState");
+    if (storedAppStateString) {
+      const parsed = JSON.parse(storedAppStateString);
+      // Ensure parsed is an object before assigning
+      if (parsed && typeof parsed === 'object') {
+        loadedState = parsed;
+      }
     }
-  } catch {
-    /* ignored */
+  } catch (e) {
+    console.error("Failed to load or parse state from localStorage:", e);
+    loadedState = {}; // Reset to empty on error
   }
 
-  const regulationVersionName = window.location.pathname.substring(1);
-  if (regulationVersionName && regulationVersionName in regulationVersions) {
-    appState.regulationVersionName = regulationVersionName as RegulationVersionName;
+  // Determine regulation version (URL > Loaded > Default)
+  let regulationVersionName = defaultAppState.regulationVersionName;
+  const urlVersionName = window.location.pathname.substring(1);
+  if (urlVersionName && urlVersionName in regulationVersions) {
+    regulationVersionName = urlVersionName as RegulationVersionName;
+  } else if (loadedState.regulationVersionName && loadedState.regulationVersionName in regulationVersions) {
+    regulationVersionName = loadedState.regulationVersionName;
+  } // else stays default
+
+  // Merge attributes: Start with defaults, overlay valid loaded values.
+  const defaultAttrs = defaultAppState.attributes;
+  const loadedAttrs = (loadedState.attributes && typeof loadedState.attributes === 'object')
+    ? loadedState.attributes
+    : {}; // Ensure loadedAttrs is an object
+  const attributes: Attributes = { ...defaultAttrs }; // Start with a copy of defaults
+  for (const key of Object.keys(defaultAttrs) as Array<keyof Attributes>) {
+    const potentialLoadedValue = (loadedAttrs as Partial<Attributes>)[key];
+    // Use loaded value only if it exists and is a valid number
+    if (key in loadedAttrs && potentialLoadedValue !== undefined && typeof potentialLoadedValue === 'number') {
+      attributes[key] = potentialLoadedValue;
+    }
+    // Otherwise, the key retains its default value from the initial spread
   }
 
-  return appState;
+  // Construct the final state object correctly
+  const finalState: AppState = {
+    regulationVersionName,
+    attributes, // Use the fully merged & validated attributes
+    twoHanding: typeof loadedState.twoHanding === 'boolean' ? loadedState.twoHanding : defaultAppState.twoHanding,
+    upgradeLevel: typeof loadedState.upgradeLevel === 'number' ? loadedState.upgradeLevel : defaultAppState.upgradeLevel,
+    weaponTypes: Array.isArray(loadedState.weaponTypes) ? loadedState.weaponTypes : defaultAppState.weaponTypes, // Basic array check
+    affinityIds: Array.isArray(loadedState.affinityIds) ? loadedState.affinityIds : defaultAppState.affinityIds,
+    includeDLC: typeof loadedState.includeDLC === 'boolean' ? loadedState.includeDLC : defaultAppState.includeDLC,
+    effectiveOnly: typeof loadedState.effectiveOnly === 'boolean' ? loadedState.effectiveOnly : defaultAppState.effectiveOnly,
+    splitDamage: typeof loadedState.splitDamage === 'boolean' ? loadedState.splitDamage : defaultAppState.splitDamage,
+    groupWeaponTypes: typeof loadedState.groupWeaponTypes === 'boolean' ? loadedState.groupWeaponTypes : defaultAppState.groupWeaponTypes,
+    numericalScaling: typeof loadedState.numericalScaling === 'boolean' ? loadedState.numericalScaling : defaultAppState.numericalScaling,
+    sortBy: typeof loadedState.sortBy === 'string' ? loadedState.sortBy as SortBy : defaultAppState.sortBy, // Add type assertion
+    reverse: typeof loadedState.reverse === 'boolean' ? loadedState.reverse : defaultAppState.reverse,
+    selectedWeapons: Array.isArray(loadedState.selectedWeapons) ? loadedState.selectedWeapons : defaultAppState.selectedWeapons,
+  };
+
+  // Add deeper validation if needed (e.g., check array contents)
+
+  return finalState;
 }
 
 /**
@@ -126,56 +165,58 @@ export default function useAppState() {
 
   const changeHandlers = useMemo<Omit<UpdateAppState, keyof AppState>>(
     () => ({
-      setRegulationVersionName(regulationVersionName) {
-        setAppState((prevAppState) => ({ ...prevAppState, regulationVersionName }));
+      setRegulationVersionName(regulationVersionName: RegulationVersionName) {
+        setAppState((prevAppState: AppState) => ({ ...prevAppState, regulationVersionName }));
       },
-      setAttribute(attribute, value) {
-        setAppState((prevAppState) => ({
+      setAttribute(attribute: Attribute, value: number) {
+        setAppState((prevAppState: AppState) => ({
           ...prevAppState,
           attributes: { ...prevAppState.attributes, [attribute]: value },
         }));
       },
-      setTwoHanding(twoHanding) {
-        setAppState((prevAppState) => ({ ...prevAppState, twoHanding }));
+      setTwoHanding(twoHanding: boolean) {
+        setAppState((prevAppState: AppState) => ({ ...prevAppState, twoHanding }));
       },
-      setUpgradeLevel(upgradeLevel) {
-        setAppState((prevAppState) => ({ ...prevAppState, upgradeLevel }));
+      setUpgradeLevel(upgradeLevel: number) {
+        setAppState((prevAppState: AppState) => ({ ...prevAppState, upgradeLevel }));
       },
-      setWeaponTypes(weaponTypes) {
-        setAppState((prevAppState) => ({ ...prevAppState, weaponTypes }));
+      setWeaponTypes(weaponTypes: readonly WeaponType[]) {
+        setAppState((prevAppState: AppState) => ({ ...prevAppState, weaponTypes }));
       },
-      setAffinityIds(affinityIds) {
-        setAppState((prevAppState) => ({ ...prevAppState, affinityIds }));
+      setAffinityIds(affinityIds: readonly number[]) {
+        setAppState((prevAppState: AppState) => ({ ...prevAppState, affinityIds }));
       },
-      setIncludeDLC(includeDLC) {
-        setAppState((prevAppState) => ({
+      setIncludeDLC(includeDLC: boolean) {
+        setAppState((prevAppState: AppState) => ({
           ...prevAppState,
           includeDLC,
-          weaponTypes: prevAppState.weaponTypes.filter(
-            (weaponType) => !dlcWeaponTypes.includes(weaponType),
-          ),
+          weaponTypes: includeDLC
+            ? prevAppState.weaponTypes
+            : prevAppState.weaponTypes.filter(
+              (weaponType) => !dlcWeaponTypes.includes(weaponType),
+            ),
         }));
       },
-      setEffectiveOnly(effectiveOnly) {
-        setAppState((prevAppState) => ({ ...prevAppState, effectiveOnly }));
+      setEffectiveOnly(effectiveOnly: boolean) {
+        setAppState((prevAppState: AppState) => ({ ...prevAppState, effectiveOnly }));
       },
-      setSplitDamage(splitDamage) {
-        setAppState((prevAppState) => ({ ...prevAppState, splitDamage }));
+      setSplitDamage(splitDamage: boolean) {
+        setAppState((prevAppState: AppState) => ({ ...prevAppState, splitDamage }));
       },
-      setGroupWeaponTypes(groupWeaponTypes) {
-        setAppState((prevAppState) => ({ ...prevAppState, groupWeaponTypes }));
+      setGroupWeaponTypes(groupWeaponTypes: boolean) {
+        setAppState((prevAppState: AppState) => ({ ...prevAppState, groupWeaponTypes }));
       },
-      setNumericalScaling(numericalScaling) {
-        setAppState((prevAppState) => ({ ...prevAppState, numericalScaling }));
+      setNumericalScaling(numericalScaling: boolean) {
+        setAppState((prevAppState: AppState) => ({ ...prevAppState, numericalScaling }));
       },
-      setSortBy(sortBy) {
-        setAppState((prevAppState) => ({ ...prevAppState, sortBy }));
+      setSortBy(sortBy: SortBy) {
+        setAppState((prevAppState: AppState) => ({ ...prevAppState, sortBy }));
       },
-      setReverse(reverse) {
-        setAppState((prevAppState) => ({ ...prevAppState, reverse }));
+      setReverse(reverse: boolean) {
+        setAppState((prevAppState: AppState) => ({ ...prevAppState, reverse }));
       },
-      setSelectedWeapons(selectedWeapons) {
-        setAppState((prevAppState) => ({ ...prevAppState, selectedWeapons }));
+      setSelectedWeapons(selectedWeapons: WeaponOption[]) {
+        setAppState((prevAppState: AppState) => ({ ...prevAppState, selectedWeapons }));
       },
     }),
     [],

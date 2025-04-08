@@ -13,13 +13,16 @@ import {
   useMediaQuery,
   useTheme,
   type Theme,
+  Tabs,
+  Tab,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBackRounded";
 import WeaponListSettings from "./WeaponListSettings.tsx";
 import WeaponTable from "./weaponTable/WeaponTable.tsx";
 import useWeaponTableRows from "./weaponTable/useWeaponTableRows.tsx";
+import OptimizerTab from "../optimizer/OptimizerTab.tsx";
 import theme from "./theme.ts";
-import regulationVersions from "./regulationVersions.tsx";
+import regulationVersions, { type RegulationVersionName, type RegulationVersion } from "./regulationVersions.tsx";
 import useWeapons from "./useWeapons.ts";
 import useAppState from "./useAppState.ts";
 import AppBar from "./AppBar.tsx";
@@ -99,6 +102,32 @@ function RegulationVersionAlert({ children }: { children: ReactNode }) {
   );
 }
 
+// Helper component for Tab Panels
+interface TabPanelProps {
+  children?: React.ReactNode;
+  index: number;
+  value: number;
+}
+
+function TabPanel(props: TabPanelProps) {
+  const { children, value, index, ...other } = props;
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`simple-tabpanel-${index}`}
+      aria-labelledby={`simple-tab-${index}`}
+      {...other}
+    >
+      {value === index && (
+        <Box sx={{ pt: 3 }}>
+          {children}
+        </Box>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const {
     regulationVersionName,
@@ -132,13 +161,14 @@ export default function App() {
   } = useAppState();
 
   const { isMobile, menuOpen, menuOpenMobile, onMenuOpenChanged } = useMenuState();
+  const [currentTab, setCurrentTab] = useState(0);
 
-  // TODO pagination if there are >200 results
   const offset = 0;
   const limit = 200;
-  const { weapons, loading, error } = useWeapons(regulationVersionName);
+  const { weapons, loading: isLoadingWeapons, error: weaponError } = useWeapons(regulationVersionName);
 
-  const regulationVersion = regulationVersions[regulationVersionName];
+  const currentRegulationVersionName = regulationVersionName in regulationVersions ? regulationVersionName : "latest";
+  const regulationVersion: RegulationVersion = regulationVersions[currentRegulationVersionName as RegulationVersionName];
 
   const { rowGroups, attackPowerTypes, spellScaling, total } = useWeaponTableRows({
     weapons,
@@ -161,7 +191,7 @@ export default function App() {
 
   const tablePlaceholder = useMemo(
     () =>
-      loading ? (
+      isLoadingWeapons ? (
         <>
           <Typography variant="body1" align="center" sx={{ alignSelf: "end" }}>
             Loading weapon data
@@ -175,7 +205,7 @@ export default function App() {
           No weapons match your selections
         </Typography>
       ),
-    [loading],
+    [isLoadingWeapons],
   );
 
   const tableFooter = useMemo(
@@ -188,53 +218,71 @@ export default function App() {
     [total, limit],
   );
 
-  let mainContent: ReactNode;
-  if (error) {
-    mainContent = (
+  let calculatorContent: ReactNode;
+  if (weaponError) {
+    calculatorContent = (
       <Alert severity="error" sx={{ my: 3 }}>
-        Oops, something went wrong loading weapons ({error.message})
+        Oops, something went wrong loading weapons ({weaponError.message})
       </Alert>
     );
   } else {
-    mainContent = (
-      <WeaponTable
-        rowGroups={rowGroups}
-        placeholder={tablePlaceholder}
-        footer={tableFooter}
-        sortBy={sortBy}
-        reverse={reverse}
-        splitDamage={splitDamage}
-        splitSpellScaling={!!regulationVersion.splitSpellScaling}
-        numericalScaling={numericalScaling}
-        attackPowerTypes={attackPowerTypes}
-        spellScaling={spellScaling}
-        onSortByChanged={setSortBy}
-        onReverseChanged={setReverse}
-      />
+    calculatorContent = (
+      <>
+        <WeaponListSettings
+          breakpoint={menuOpen ? "lg" : "md"}
+          attributes={attributes}
+          twoHanding={twoHanding}
+          upgradeLevel={upgradeLevel}
+          maxUpgradeLevel={regulationVersion.maxUpgradeLevel}
+          splitDamage={splitDamage}
+          groupWeaponTypes={groupWeaponTypes}
+          numericalScaling={numericalScaling}
+          onAttributeChanged={setAttribute}
+          onTwoHandingChanged={setTwoHanding}
+          onUpgradeLevelChanged={setUpgradeLevel}
+          onSplitDamageChanged={setSplitDamage}
+          onGroupWeaponTypesChanged={setGroupWeaponTypes}
+          onNumericalScalingChanged={setNumericalScaling}
+        />
+        <RegulationVersionAlert key={currentRegulationVersionName}>
+          {regulationVersion.info}
+        </RegulationVersionAlert>
+        <WeaponTable
+          rowGroups={rowGroups}
+          placeholder={tablePlaceholder}
+          footer={tableFooter}
+          sortBy={sortBy}
+          reverse={reverse}
+          splitDamage={splitDamage}
+          splitSpellScaling={!!regulationVersion.splitSpellScaling}
+          numericalScaling={numericalScaling}
+          attackPowerTypes={attackPowerTypes}
+          spellScaling={spellScaling}
+          onSortByChanged={setSortBy}
+          onReverseChanged={setReverse}
+        />
+      </>
     );
   }
 
-  // The Convergence and Reforged don't separate DLC content, so this option is only relevant to
-  // vanilla
-  const showIncludeDLC = regulationVersionName === "latest";
+  const showIncludeDLC = currentRegulationVersionName === "latest";
   const includeDLCWeaponTypes = includeDLC || !showIncludeDLC;
 
   const weaponPickerOptions = useMemo(() => {
     const dedupedWeaponsByWeaponName = [
       ...weapons
-        .reduce((acc, weapon) => {
+        .reduce((acc: Map<string, Weapon>, weapon: Weapon) => {
           return acc.set(weapon.weaponName, weapon);
         }, new Map<string, Weapon>())
         .values(),
     ].filter((weapon) => (includeDLC ? true : !weapon.dlc));
-
     return makeWeaponOptionsFromWeapon(dedupedWeaponsByWeaponName);
   }, [weapons, includeDLC]);
 
   const drawerContent = (
     <>
       <RegulationVersionPicker
-        regulationVersionName={regulationVersionName}
+        regulationVersionName={currentRegulationVersionName}
         onRegulationVersionNameChanged={setRegulationVersionName}
       />
       <MiscFilterPicker
@@ -248,6 +296,7 @@ export default function App() {
         selectedWeapons={selectedWeapons}
         onSelectedWeaponsChanged={setSelectedWeapons}
         weaponOptions={weaponPickerOptions}
+        loading={isLoadingWeapons}
       />
       <AffinityPicker
         affinityOptions={regulationVersion.affinityOptions}
@@ -263,6 +312,10 @@ export default function App() {
       )}
     </>
   );
+
+  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+    setCurrentTab(newValue);
+  };
 
   return (
     <ThemeProvider theme={theme}>
@@ -338,28 +391,24 @@ export default function App() {
         </Drawer>
 
         <Box display="grid" sx={{ gap: 2 }}>
-          <WeaponListSettings
-            breakpoint={menuOpen ? "lg" : "md"}
-            attributes={attributes}
-            twoHanding={twoHanding}
-            upgradeLevel={upgradeLevel}
-            maxUpgradeLevel={regulationVersion.maxUpgradeLevel}
-            splitDamage={splitDamage}
-            groupWeaponTypes={groupWeaponTypes}
-            numericalScaling={numericalScaling}
-            onAttributeChanged={setAttribute}
-            onTwoHandingChanged={setTwoHanding}
-            onUpgradeLevelChanged={setUpgradeLevel}
-            onSplitDamageChanged={setSplitDamage}
-            onGroupWeaponTypesChanged={setGroupWeaponTypes}
-            onNumericalScalingChanged={setNumericalScaling}
-          />
+          <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+            <Tabs value={currentTab} onChange={handleTabChange} aria-label="Calculator and Optimizer Tabs">
+              <Tab label="Calculator" id="simple-tab-0" aria-controls="simple-tabpanel-0" />
+              <Tab label="Optimizer" id="simple-tab-1" aria-controls="simple-tabpanel-1" />
+            </Tabs>
+          </Box>
 
-          <RegulationVersionAlert key={regulationVersionName}>
-            {regulationVersion.info}
-          </RegulationVersionAlert>
-
-          {mainContent}
+          <TabPanel value={currentTab} index={0}>
+            {calculatorContent}
+          </TabPanel>
+          <TabPanel value={currentTab} index={1}>
+            <OptimizerTab
+              weapons={weapons}
+              regulationVersion={regulationVersion}
+              attackPowerTypes={Array.from(attackPowerTypes)}
+              isLoadingWeapons={isLoadingWeapons}
+            />
+          </TabPanel>
 
           <Footer />
         </Box>
