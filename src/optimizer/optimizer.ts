@@ -1,11 +1,12 @@
 import { calculateBuildScore } from "./evaluate";
-import type { OptimizerInput, OptimizerResult } from "./types";
+import type { OptimizerInput, OptimizerResult, EvaluateBuildScore } from "./types";
 import type { OptimizerStrategy } from "./strategies/interface";
 import { greedyAllocateStrategy } from "./strategies/greedy"; // Default strategy
 import type { Attributes } from "../calculator/attributes";
 import { allAttributes } from "../calculator/attributes"; // Import allAttributes
 import getWeaponAttack from "../calculator/calculator";
 import { getStartingStats } from "./utils"; // Use getStartingStats
+import type { Weapon } from "../calculator/weapon"; // Import Weapon type
 
 // Main function to run the optimization process
 export function optimizeBuild(
@@ -25,27 +26,22 @@ export function optimizeBuild(
     console.log('Initial Class Attributes:', JSON.stringify(initialAttributes, null, 2));
     console.log('Initial Class Level:', initialLevel);
 
-    // Use input.weapon directly
-    const selectedWeaponDetails = input.weapon;
-    // Remove check as weapon is guaranteed by type
-    // if (!selectedWeaponDetails) { ... }
+    // Use input.weapons (array)
+    const selectedWeaponsDetails = input.weapons;
 
-    // Calculate the actual starting attributes considering the minimums
+    // Calculate minimums based on ALL selected weapons
     const actualStartingAttributes: Attributes = { ...initialAttributes };
     let levelAfterMinimums = initialLevel;
 
     allAttributes.forEach((attr) => {
         const classStat = initialAttributes[attr];
-        // Access minimums from input object
-        const minimumStat = input.minimumAttributes[attr] ?? 0;
-        // Use the correct property name 'requirements'
-        const weaponRequirement = selectedWeaponDetails.requirements[attr] ?? 0;
+        const minimumStatInput = input.minimumAttributes[attr] ?? 0;
+        // Find the highest requirement across all selected weapons for this attribute
+        const maxWeaponRequirement = Math.max(0, ...selectedWeaponsDetails.map(w => w.requirements[attr] ?? 0));
 
-        // Use the highest of class stat, user minimum, or weapon requirement
-        const requiredStat = Math.max(classStat, minimumStat, weaponRequirement);
+        const requiredStat = Math.max(classStat, minimumStatInput, maxWeaponRequirement);
         actualStartingAttributes[attr] = requiredStat;
 
-        // Add points spent if we had to raise the stat above the class base
         if (requiredStat > classStat) {
             levelAfterMinimums += requiredStat - classStat;
         }
@@ -56,18 +52,19 @@ export function optimizeBuild(
     // If target level is below the level needed for minimums, just return minimums
     if (input.targetLevel < levelAfterMinimums) {
         console.warn('Target level is lower than required for minimum/weapon stats. Returning minimums.');
-        // Correct calculateBuildScore call (remove affinityId)
         const score = calculateBuildScore(
             actualStartingAttributes,
-            selectedWeaponDetails,
+            selectedWeaponsDetails,
             input.upgradeLevel,
             input.objectiveWeights,
+            input.weaponWeights
         );
+        // Get detailed attack for the first weapon only
         const attackResult = getWeaponAttack({
-            weapon: selectedWeaponDetails,
+            weapon: selectedWeaponsDetails[0],
             attributes: actualStartingAttributes,
             upgradeLevel: input.upgradeLevel,
-            twoHanding: false, // Make configurable?
+            twoHanding: false,
         });
         console.log('--- optimizeBuild END (target level too low) ---');
         return {
@@ -82,41 +79,43 @@ export function optimizeBuild(
     const pointsToAllocate = input.targetLevel - levelAfterMinimums;
     console.log('Points to Allocate:', pointsToAllocate);
 
-    // Define the evaluation function for the strategy
-    // Correct calculateBuildScore call (remove affinityId)
-    const evaluate = (attributes: Attributes) =>
+    // Define the evaluation function for the strategy - must match EvaluateBuildScore signature
+    const evaluate: EvaluateBuildScore = (attributes: Attributes, weaponsToEvaluate: Weapon[] = selectedWeaponsDetails) =>
         calculateBuildScore(
             attributes,
-            selectedWeaponDetails,
+            weaponsToEvaluate,
             input.upgradeLevel,
             input.objectiveWeights,
+            input.weaponWeights
         );
 
     // Run the optimization strategy
-    // Pass input.minimumAttributes
     const optimizedAttributes = strategy(
-        actualStartingAttributes, // Start allocation from *after* minimums are met
+        actualStartingAttributes,
         pointsToAllocate,
-        input.minimumAttributes, // Pass minimums from input
-        evaluate
+        input.minimumAttributes,
+        evaluate, // Pass the evaluate function expecting (attrs, weapons)
+        selectedWeaponsDetails // Pass the weapons array itself
     );
 
     console.log('Optimized Attributes from Strategy:', JSON.stringify(optimizedAttributes, null, 2));
-    const finalScore = evaluate(optimizedAttributes);
+    // Evaluate final score with all weapons by calling evaluate directly
+    const finalScore = evaluate(optimizedAttributes, selectedWeaponsDetails);
     console.log('Score from Strategy:', finalScore);
     console.log('--- optimizeBuild END ---');
 
+    // Get detailed attack result for the *first* weapon for display
     const attackResult = getWeaponAttack({
-        weapon: selectedWeaponDetails,
+        weapon: selectedWeaponsDetails[0],
         attributes: optimizedAttributes,
         upgradeLevel: input.upgradeLevel,
-        twoHanding: false, // Make configurable?
+        twoHanding: false,
     });
 
     return {
         optimizedAttributes,
         finalScore,
-        attackResult: attackResult,
+        attackResult: attackResult, // Result for first weapon
         startingAttributes: initialAttributes,
         startingLevel: initialLevel,
     };

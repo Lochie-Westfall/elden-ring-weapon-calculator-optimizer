@@ -19,9 +19,8 @@ import {
     AccordionDetails,
     Chip,
 } from '@mui/material';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import type { Attributes, Weapon, AttackPowerType as AttackPowerTypeType } from '../calculator/calculator';
-import { AttackPowerType } from '../calculator/calculator';
+import type { Attributes, Weapon } from '../calculator/calculator';
+import { AttackPowerType } from '../calculator/attackPowerTypes';
 import { allAttributes } from '../calculator/attributes';
 import { allDamageTypes, allStatusTypes } from '../calculator/attackPowerTypes';
 import { StartingClass, getStartingStats, calculateLevel } from './utils';
@@ -35,24 +34,25 @@ import type { RegulationVersion } from '../app/regulationVersions';
 interface OptimizerTabProps {
     weapons: Weapon[];
     regulationVersion: RegulationVersion;
-    attackPowerTypes: AttackPowerTypeType[];
+    attackPowerTypes: AttackPowerType[];
     isLoadingWeapons: boolean;
 }
 
 // Helper to create default weights
 const getDefaultWeights = (): ObjectiveWeights => ({
-    attackPower: Object.fromEntries(allDamageTypes.map(t => [t, 1])) as Record<AttackPowerTypeType, number>,
-    statusEffect: Object.fromEntries(allStatusTypes.map(t => [t, 1])) as Record<AttackPowerTypeType, number>,
+    attackPower: Object.fromEntries(allDamageTypes.map(t => [t, 1])) as Record<AttackPowerType, number>,
+    statusEffect: Object.fromEntries(allStatusTypes.map(t => [t, 1])) as Record<AttackPowerType, number>,
     spellScaling: {},
 });
 
 export default function OptimizerTab({ weapons, isLoadingWeapons }: OptimizerTabProps) {
     const [startingClass, setStartingClass] = useState<StartingClass>(StartingClass.VAGABOND);
     const [targetLevel, setTargetLevel] = useState<number>(150);
-    const [selectedWeaponOption, setSelectedWeaponOption] = useState<WeaponOption | null>(null);
+    const [selectedWeaponOptions, setSelectedWeaponOptions] = useState<WeaponOption[]>([]);
     const [upgradeLevel, setUpgradeLevel] = useState<number>(maxRegularUpgradeLevel);
     const [objectiveWeights, setObjectiveWeights] = useState<ObjectiveWeights>(getDefaultWeights());
     const [minimumAttributes, setMinimumAttributes] = useState<Partial<Record<keyof Attributes, number>>>({});
+    const [weaponWeights, setWeaponWeights] = useState<Record<string, number>>({});
 
     const [optimizationResult, setOptimizationResult] = useState<OptimizerResult | null>(null);
     const [isOptimizing, setIsOptimizing] = useState<boolean>(false);
@@ -68,9 +68,16 @@ export default function OptimizerTab({ weapons, isLoadingWeapons }: OptimizerTab
         setOptimizationResult(null);
     }, []);
 
-    const handleWeaponChange = useCallback((weapons: WeaponOption[]) => {
-        setSelectedWeaponOption(weapons[0] ?? null);
+    const handleWeaponChange = useCallback((options: WeaponOption[]) => {
+        setSelectedWeaponOptions(options);
         setOptimizationResult(null);
+        setWeaponWeights(prev => {
+            const newWeights: Record<string, number> = {};
+            for (const option of options) {
+                newWeights[option.value] = prev[option.value] ?? 1;
+            }
+            return newWeights;
+        });
     }, []);
 
     const handleUpgradeLevelChange = useCallback((event: SelectChangeEvent<string | number>) => {
@@ -79,7 +86,7 @@ export default function OptimizerTab({ weapons, isLoadingWeapons }: OptimizerTab
         setOptimizationResult(null);
     }, []);
 
-    const handleWeightChange = useCallback((category: keyof ObjectiveWeights, type: AttackPowerTypeType, value: number) => {
+    const handleWeightChange = useCallback((category: keyof ObjectiveWeights, type: AttackPowerType, value: number) => {
         setObjectiveWeights(prev => ({
             ...prev,
             [category]: {
@@ -103,10 +110,18 @@ export default function OptimizerTab({ weapons, isLoadingWeapons }: OptimizerTab
         setOptimizationResult(null);
     }, []);
 
+    const handleWeaponWeightChange = useCallback((weaponName: string, weight: number) => {
+        setWeaponWeights(prev => ({
+            ...prev,
+            [weaponName]: isNaN(weight) ? 1 : Math.max(0, weight)
+        }));
+    }, []);
+
     const selectedWeaponDetails = useMemo(() => {
-        if (!selectedWeaponOption || !weapons) return null;
-        return weapons.find(w => w.name === selectedWeaponOption.value) ?? null;
-    }, [selectedWeaponOption, weapons]);
+        if (selectedWeaponOptions.length === 0 || !weapons) return null;
+        const firstOption = selectedWeaponOptions[0];
+        return weapons.find(w => w.name === firstOption.value) ?? null;
+    }, [selectedWeaponOptions, weapons]);
 
     const maxUpgradeLevelForSelected = useMemo(() => {
         if (!selectedWeaponDetails?.attack) return maxRegularUpgradeLevel;
@@ -114,20 +129,31 @@ export default function OptimizerTab({ weapons, isLoadingWeapons }: OptimizerTab
         return actualMaxLevel;
     }, [selectedWeaponDetails]);
 
-    // Effect hook to adjust upgrade level if it exceeds the max for the selected weapon
     useEffect(() => {
         if (upgradeLevel > maxUpgradeLevelForSelected) {
             setUpgradeLevel(maxUpgradeLevelForSelected);
-            setOptimizationResult(null); // Reset result as level changed
+            setOptimizationResult(null);
         }
-        // Only run when the max level or current level changes
     }, [upgradeLevel, maxUpgradeLevelForSelected, setUpgradeLevel]);
 
     const handleOptimizeClick = useCallback(() => {
-        if (!selectedWeaponDetails) {
-            setError("Please select a weapon first.");
+        // Check if any weapons are selected
+        if (selectedWeaponOptions.length === 0) {
+            setError("Please select at least one weapon.");
             return;
         }
+
+        // Get details for ALL selected weapons
+        const selectedWeaponsDetails: Weapon[] = selectedWeaponOptions
+            .map(option => weapons.find(w => w.name === option.value))
+            .filter((w): w is Weapon => w !== undefined); // Type guard to filter out undefined
+
+        if (selectedWeaponsDetails.length !== selectedWeaponOptions.length) {
+            // This shouldn't happen if options are derived correctly, but good to check
+            setError("Could not find details for all selected weapons.");
+            return;
+        }
+
         setError(null);
         setIsOptimizing(true);
         setOptimizationResult(null);
@@ -141,13 +167,15 @@ export default function OptimizerTab({ weapons, isLoadingWeapons }: OptimizerTab
 
         setTimeout(() => {
             try {
+                // Pass the array of weapons
                 const input: OptimizerInput = {
                     startingClass,
                     targetLevel,
-                    weapon: selectedWeaponDetails!,
+                    weapons: selectedWeaponsDetails,
                     upgradeLevel,
                     objectiveWeights,
                     minimumAttributes,
+                    weaponWeights,
                 };
                 const result = optimizeBuild(input);
                 setOptimizationResult(result);
@@ -160,12 +188,14 @@ export default function OptimizerTab({ weapons, isLoadingWeapons }: OptimizerTab
         }, 10);
 
     }, [
-        selectedWeaponDetails,
+        selectedWeaponOptions, // Depend on the options array
+        weapons, // Need weapons list for mapping
         startingClass,
         targetLevel,
         upgradeLevel,
         objectiveWeights,
         minimumAttributes,
+        weaponWeights,
     ]);
 
     const weaponPickerOptions = useMemo(() => {
@@ -216,12 +246,12 @@ export default function OptimizerTab({ weapons, isLoadingWeapons }: OptimizerTab
                         </Grid>
                         <Grid item xs={12} sm={4}>
                             <WeaponPicker
-                                multiple={false}
-                                selectedWeapons={selectedWeaponOption ? [selectedWeaponOption] : []}
+                                multiple={true}
+                                selectedWeapons={selectedWeaponOptions}
                                 onSelectedWeaponsChanged={handleWeaponChange}
                                 weaponOptions={weaponPickerOptions}
                                 loading={isLoadingWeapons}
-                                label="Weapon"
+                                label="Weapons"
                                 size="small"
                             />
                         </Grid>
@@ -246,6 +276,30 @@ export default function OptimizerTab({ weapons, isLoadingWeapons }: OptimizerTab
                                         ))}
                                     </Select>
                                 </FormControl>
+                            </Grid>
+                        )}
+
+                        {/* Conditionally display Weapon Weights section */}
+                        {selectedWeaponOptions.length > 1 && (
+                            <Grid item xs={12} sx={{ pt: '8px !important' }}> {/* Adjust top padding */}
+                                <Typography variant="caption" display="block" gutterBottom>
+                                    Weapon Weights (higher prioritizes that weapon&apos;s score)
+                                </Typography>
+                                <Grid container spacing={1}>
+                                    {selectedWeaponOptions.map(option => (
+                                        <Grid item xs={6} sm={4} md={3} key={`weight-${option.value}`}>
+                                            <NumberTextField
+                                                label={option.label}
+                                                value={weaponWeights[option.value] ?? 1}
+                                                onChange={val => handleWeaponWeightChange(option.value, val)}
+                                                size="small"
+                                                min={0}
+                                                step={0.1}
+                                                fullWidth
+                                            />
+                                        </Grid>
+                                    ))}
+                                </Grid>
                             </Grid>
                         )}
                     </Grid>
@@ -377,7 +431,7 @@ export default function OptimizerTab({ weapons, isLoadingWeapons }: OptimizerTab
                                         .filter(([, value]) => value > 0) // Only show non-zero values
                                         .map(([key, value]) => (
                                             <Typography key={key} variant="body2">
-                                                {damageTypeLabels.get(Number(key) as AttackPowerTypeType) ?? `Type ${key}`}: {value.toFixed(1)}
+                                                {damageTypeLabels.get(Number(key) as AttackPowerType) ?? `Type ${key}`}: {value.toFixed(1)}
                                             </Typography>
                                         ))}
                                     {Object.keys(optimizationResult.attackResult.attackPower).length === 0 && <Typography variant="body2">N/A</Typography>}
@@ -389,7 +443,7 @@ export default function OptimizerTab({ weapons, isLoadingWeapons }: OptimizerTab
                                         <Box sx={{ pl: 2 }}>
                                             {Object.entries(optimizationResult.attackResult.spellScaling).map(([key, value]) => (
                                                 <Typography key={key} variant="body2">
-                                                    {damageTypeLabels.get(Number(key) as AttackPowerTypeType) ?? `Type ${key}`}: {value.toFixed(1)}
+                                                    {damageTypeLabels.get(Number(key) as AttackPowerType) ?? `Type ${key}`}: {value.toFixed(1)}
                                                 </Typography>
                                             ))}
                                         </Box>
@@ -403,7 +457,7 @@ export default function OptimizerTab({ weapons, isLoadingWeapons }: OptimizerTab
                                 )}
                                 {optimizationResult.attackResult.ineffectiveAttackPowerTypes.length > 0 && (
                                     <Typography variant="caption" display="block" color="text.secondary">
-                                        Penalized: {optimizationResult.attackResult.ineffectiveAttackPowerTypes.map(t => damageTypeLabels.get(t as AttackPowerTypeType) ?? `Type ${t}`).join(', ')}
+                                        Penalized: {optimizationResult.attackResult.ineffectiveAttackPowerTypes.map(t => damageTypeLabels.get(t as AttackPowerType) ?? `Type ${t}`).join(', ')}
                                     </Typography>
                                 )}
                             </Box>

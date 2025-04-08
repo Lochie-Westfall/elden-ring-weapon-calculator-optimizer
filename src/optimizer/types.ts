@@ -8,10 +8,11 @@ import { StartingClass } from "./utils";
 export interface OptimizerInput {
     startingClass: StartingClass; // Use StartingClass enum/type
     targetLevel: number;
-    weapon: Weapon; // The specific weapon instance to optimize for
+    weapons: Weapon[]; // Changed from weapon: Weapon
     upgradeLevel: number;
     objectiveWeights: ObjectiveWeights; // User-defined weights for scoring
     minimumAttributes: Partial<Attributes>; // Add minimum attributes
+    weaponWeights: Record<string, number>; // Re-add weapon weights
     // constraints?: BuildConstraints; // Optional: Max equip load, required spells etc. (Future)
 }
 
@@ -34,4 +35,4 @@ export interface OptimizerResult {
 }
 
 // Function signature for evaluating a build's score based on attributes
-export type EvaluateBuildScore = (attributes: Attributes) => number; 
+export type EvaluateBuildScore = (attributes: Attributes, weapons: Weapon[]) => number; 

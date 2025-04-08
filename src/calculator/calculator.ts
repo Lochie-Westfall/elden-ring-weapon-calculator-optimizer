@@ -122,8 +122,11 @@ export default function getWeaponAttack({
             }
 
             if (scaling) {
-              totalScaling +=
-                weapon.calcCorrectGraphs[attackPowerType][effectiveAttributes[attribute]] * scaling;
+              // Ensure the scaling graph exists for this damage type before accessing it
+              const calcCorrectGraph = weapon.calcCorrectGraphs[attackPowerType];
+              if (calcCorrectGraph) {
+                totalScaling += calcCorrectGraph[effectiveAttributes[attribute]] * scaling;
+              }
             }
           }
         }
